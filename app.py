@@ -1,57 +1,23 @@
-# app.py - Phelipe Local - Versão Final Atualizada (12/08/2025)
-# Assistente de Análise de PPCIs do TCE-MT com memória institucional
-
+# app.py - Phelipe Online - Versão para Streamlit Cloud (sem OCR)
 import streamlit as st
 import google.generativeai as genai
 import os
 import io
 import pandas as pd
 import PyPDF2
-from pdf2image import convert_from_bytes  # ✅ Importação correta
-import pytesseract  # ✅ Importação correta
 import json
 from datetime import datetime
-import glob
 
 # Configuração da página
-st.set_page_config(page_title="Phelipe - TCE-MT", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="Phelipe Online - TCE-MT", page_icon="🔍", layout="wide")
 st.title("🔍 Phelipe: Assistente de Análise de PPCIs do TCE-MT")
 
-# Configurar API do Gemini
-api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-if not api_key:
-    st.error("⚠️ Configure a chave da API do Gemini em `.streamlit/secrets.toml` ou como variável de ambiente.")
-    st.stop()
-
+# Configurar API do Gemini (usando Secrets do Streamlit)
+api_key = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=api_key)
 model = genai.GenerativeModel("gemini-1.5-pro")
 
-# Função para extrair texto com OCR se necessário
-def extrair_texto_estruturado(uploaded_files):
-    documentos_texto = ""
-    for file in uploaded_files:
-        # Lê o PDF
-        file.seek(0)  # Garante que o ponteiro está no início
-        pdf_reader = PyPDF2.PdfReader(file)
-        for i, page in enumerate(pdf_reader.pages):
-            text = page.extract_text() or ""
-            if text.strip():
-                documentos_texto += f"\n[{file.name} - Página {i+1}]\n{text}\n"
-        
-        # Se não extraiu texto suficiente, tenta OCR
-        if len(documentos_texto.strip()) < 100:  # PDF escaneado
-            st.info(f"📄 {file.name} sem texto suficiente. Aplicando OCR...")
-            try:
-                images = convert_from_bytes(file.getvalue(), dpi=150)
-                for i, img in enumerate(images):
-                    ocr_text = pytesseract.image_to_string(img, lang='por')
-                    documentos_texto += f"\n[{file.name} - Página {i+1} (OCR)]\n{ocr_text}\n"
-            except Exception as e:
-                st.warning(f"Erro ao aplicar OCR em {file.name}: {e}")
-    
-    return documentos_texto
-
-# Prompt detalhado com análise diferenciada por status da ação
+# Prompt detalhado
 prompt_sistema = """
 Você é Phelipe, um agente especializado em análise de recomendações do TCE-MT, com dupla expertise:
 1. Técnico de controle externo (TCE-MT)
@@ -71,38 +37,37 @@ ANÁLISE POR STATUS DA AÇÃO:
 - Se a ação está "Em Implementação":
   → Avalie o potencial de eficácia: a ação descrita, se realizada conforme planejado, corrige o problema?
   → Verifique se o prazo informado é coerente, factível e razoável.
-  → Se não houver prazo na recomendação, avalie se o prazo apresentado é adequado.
-  → Considere riscos de não conclusão.
 
 - Se a ação está "Implementada":
   → Verifique se há evidência documental da execução.
   → Avalie se a ação realmente implementou a recomendação.
-  → Confira se a evidência apresentada comprova de fato o que foi afirmado.
-
-ANÁLISE CONTEXTUAL (SES-MT):
-Avalie a viabilidade prática da ação, considerando:
-- Estrutura da SES-MT
-- Recursos humanos
-- Sistemas de informação
-
-MEMÓRIA INSTITUCIONAL:
-Após a análise, consulte o histórico e gere observações como:
-> 💬 Phelipe lembra: Este tipo de irregularidade já ocorreu em 3 unidades nos últimos 18 meses.
 
 SAÍDA:
 Retorne apenas um JSON com:
 {
-  "relatorio_tecnico": "Texto completo com sumário, análise e conclusão.",
-  "analise_contextual": "Avaliação da viabilidade dentro da SES-MT.",
+  "relatorio_tecnico": "...",
+  "analise_contextual": "...",
   "classificacao_final": "✅ Compatível",
   "insights_capacitacao": {},
-  "observacoes_memoria": ""
+  "observacoes_memoria": "..."
 }
 """
 
+# Função para extrair texto do PDF (sem OCR)
+def extrair_texto_pdf(uploaded_file):
+    try:
+        uploaded_file.seek(0)
+        pdf_reader = PyPDF2.PdfReader(uploaded_file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() or ""
+        return text
+    except Exception as e:
+        return f"[Erro ao ler PDF: {uploaded_file.name}]"
+
 # Interface
 st.subheader("📥 Documentos do Processo")
-uploaded_files = st.file_uploader("Envie todos os documentos (PDFs, imagens)", type=["pdf", "jpg", "jpeg", "png"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Envie todos os documentos (PDFs)", type=["pdf"], accept_multiple_files=True)
 
 st.subheader("📝 Dados da Análise")
 servidor_uniseci = st.text_input("🧑‍💼 Servidor da UNISECI/SES-MT")
@@ -118,7 +83,6 @@ gestor = st.text_input("👨‍💼 Gestor")
 
 recomendacao = st.text_area("📌 Recomendação", height=150)
 
-# NOVOS CAMPOS ADICIONADOS
 status_acao = st.selectbox(
     "🔧 Status da Ação do Gestor",
     ["Selecione...", "Implementada", "Em Implementação"],
@@ -135,15 +99,20 @@ acao_gestor = st.text_area("📝 Ação do Gestor", height=150)
 if st.button("🚀 Analisar com Phelipe") and uploaded_files and num_decisao and status_acao != "Selecione...":
     with st.spinner("Phelipe está analisando... ⏳"):
         try:
-            documentos_texto = extrair_texto_estruturado(uploaded_files)
-            
+            # Extrai texto dos PDFs
+            documentos_texto = ""
+            for file in uploaded_files:
+                text = extrair_texto_pdf(file)
+                documentos_texto += f"\n[{file.name}]\n{text}\n"
+
+            # Monta prompt completo
             prompt_completo = f"{prompt_sistema}\n\nNúmero da Decisão: {num_decisao}\nData da Decisão: {data_decisao}\nProcesso: {num_processo_tce}\nPPCI: {num_ppci}\nRecomendação: {recomendacao}\nStatus da Ação: {status_acao}\nData de Implementação (Gestor): {data_implementacao_gestor}\nAção do Gestor: {acao_gestor}\n\n{documentos_texto}"
             
             response = model.generate_content(prompt_completo)
             output = response.text
 
             try:
-                # Extrai JSON (suporta ```json ou apenas { })
+                # Extrai JSON
                 json_str = None
                 if "```json" in output:
                     json_start = output.find("```json") + 7
@@ -202,27 +171,6 @@ if st.button("🚀 Analisar com Phelipe") and uploaded_files and num_decisao and
                     mime="text/csv"
                 )
 
-                # Salva no histórico
-                historico_path = "memoria/historico.csv"
-                os.makedirs("memoria", exist_ok=True)
-                if os.path.exists(historico_path):
-                    df_hist = pd.read_csv(historico_path)
-                    df_hist = pd.concat([df_hist, df], ignore_index=True)
-                else:
-                    df_hist = df
-                df_hist.to_csv(historico_path, index=False, encoding='utf-8-sig')
-
-                # Campo de perguntas
-                st.subheader("🧠 Pergunte ao Phelipe (Memória Institucional)")
-                pergunta = st.text_input("Ex: Já houve recomendação sobre dispensa de licitação em Rondonópolis?")
-                if pergunta:
-                    st.info("Phelipe está analisando padrões no histórico...")
-                    # Aqui você pode integrar uma busca com Gemini no histórico
-
-            except json.JSONDecodeError as e:
-                st.error(f"Erro ao decodificar JSON: {e}")
-                st.text("Saída bruta do Gemini:")
-                st.text(output)
             except Exception as e:
                 st.error(f"Erro ao processar saída: {e}")
                 st.text(output)
