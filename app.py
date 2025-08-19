@@ -1,3 +1,4 @@
+# app.py - Phelipe Online - Versão para Streamlit Cloud (sem OCR)
 import streamlit as st
 import google.generativeai as genai
 import os
@@ -5,16 +6,6 @@ import pandas as pd
 import PyPDF2
 import json
 from datetime import datetime
-
-# --- INICIALIZAÇÃO DO SESSION_STATE ---
-if 'analise_feita' not in st.session_state:
-    st.session_state.analise_feita = False
-if 'data' not in st.session_state:
-    st.session_state.data = {}
-if 'csv' not in st.session_state:
-    st.session_state.csv = None
-if 'csv_filename' not in st.session_state:
-    st.session_state.csv_filename = ""
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Phelipe Online - TCE-MT", page_icon="🔍", layout="wide")
@@ -29,7 +20,7 @@ except Exception as e:
     st.error("⚠️ Erro de configuração. Contate o administrador.")
     st.stop()
 
-# --- PROMPT DO SISTEMA (IGUAL AO LOCAL, SEM OCR) ---
+# --- PROMPT DO SISTEMA (ANÁLISE GERAL) ---
 prompt_sistema = """
 Você é Phelipe, um agente especializado em análise de recomendações do TCE-MT, com dupla expertise:
 1. Técnico de controle externo (TCE-MT)
@@ -173,9 +164,99 @@ if st.button("🚀 Analisar com Phelipe") and uploaded_files and num_decisao and
                 else:
                     data = {"relatorio_tecnico": "Erro: Não foi possível extrair o JSON da resposta do Gemini."}
 
-                # Salva no session_state
-                st.session_state.data = data
-                st.session_state.analise_feita = True
+                # --- EXIBIÇÃO DOS RESULTADOS ---
+                st.subheader("📄 Relatório Técnico")
+                st.write(data.get("relatorio_tecnico", "Não disponível"))
+
+                st.subheader("🏥 Análise Contextual (SES-MT)")
+                st.write(data.get("analise_contextual", "Não disponível"))
+
+                # --- 📝 ANÁLISE DA AÇÃO DO GESTOR (com prompt isolado) ---
+                st.subheader("📝 Análise da Ação do Gestor")
+                
+                try:
+                    prompt_analise_acao = f"""
+                    Você é Phelipe, um especialista técnico em controle interno, controle externo, SES/MT, integridade e normas aplicáveis.
+                    Sua tarefa é **avaliar diretamente se a ação do gestor cumpre a recomendação**, com base apenas nos documentos.
+
+                    ### RECOMENDAÇÃO:
+                    {recomendacao}
+
+                    ### AÇÃO DO GESTOR:
+                    {acao_gestor}
+
+                    ### STATUS DA AÇÃO:
+                    {status_acao}
+
+                    ### INSTRUÇÕES:
+                    1. Compare diretamente a ação com a recomendação.
+                    2. Se o status for "Implementada":
+                       - Verifique se há **evidência documental** da execução.
+                       - Avalie se a ação **realmente implementou** a recomendação.
+                    3. Se o status for "Em Implementação":
+                       - Avalie o **potencial de eficácia**: a ação descrita corrige a causa raiz?
+                       - Verifique se o **prazo informado é coerente e factível**.
+                    4. Classifique com base nisso:
+                       - ✅ Compatível: ação completa e comprovada (ou plano viável)
+                       - ⚠️ Parcialmente compatível: ação incompleta, sem evidência ou com risco alto
+                       - ❌ Incompatível: ação irrelevante, contradiz a recomendação ou não corrige o problema
+                       - 🚫 Não Aplicável: justifique
+                    5. Retorne apenas um texto claro, técnico e objetivo, com até 150 palavras.
+                    6. Nunca invente dados. Se não constar, diga "Não consta no documento".
+                    """
+
+                    response_acao = model.generate_content(prompt_analise_acao)
+                    analise_acao = response_acao.text.strip()
+                    st.write(analise_acao)
+
+                    # Atualiza a classificação final
+                    if "✅ Compatível" in analise_acao:
+                        classificacao_final = "✅ Compatível"
+                    elif "⚠️ Parcialmente" in analise_acao:
+                        classificacao_final = "⚠️ Parcialmente compatível"
+                    elif "❌ Incompatível" in analise_acao:
+                        classificacao_final = "❌ Incompatível"
+                    elif "🚫 Não Aplicável" in analise_acao:
+                        classificacao_final = "🚫 Não Aplicável"
+                    else:
+                        classificacao_final = "❓ Não classificado"
+
+                except Exception as e:
+                    st.error(f"Erro ao gerar análise da ação: {e}")
+                    classificacao_final = "Erro na análise"
+
+                # --- 📊 CLASSIFICAÇÃO FINAL ---
+                st.subheader("📊 Classificação Final")
+                st.markdown(f"**{classificacao_final}**")
+
+                # --- 🧠 INSIGHTS PARA CAPACITAÇÃO ---
+                st.subheader("🎓 Insights para Capacitação")
+                insights = data.get("insights_capacitacao", {})
+                st.write("**Padrões identificados:**")
+                for p in insights.get("padroes_identificados", []):
+                    st.write(f"• {p}")
+                st.write("**Sugestões de prevenção:**")
+                for s in insights.get("sugestoes_prevencao", []):
+                    st.write(f"• {s}")
+                st.write("**Modus Operandi (se houver indício de má-fé):**")
+                for m in insights.get("modus_operandi", []):
+                    st.write(f"• {m}")
+
+                # --- 💸 INDÍCIOS DE DANO AO ERÁRIO ---
+                st.subheader("⚠️ Indícios de Dano ao Erário")
+                dano = data.get("indicios_dano_erario", {})
+                if dano.get("consta_dano"):
+                    st.markdown(f"**✅ Há indício de dano ao erário**")
+                    st.write(dano.get("descricao", "Não especificado"))
+                    st.caption(f"Fonte: {dano.get('fundamentacao', 'Não consta')}")
+                else:
+                    st.markdown(f"**❌ Não há menção a dano ao erário**")
+                    st.caption(dano.get("descricao", "Não consta"))
+
+                # --- 🧠 OBSERVAÇÕES DE MEMÓRIA INSTITUCIONAL ---
+                st.subheader("🧠 Observações Contextuais (Memória Institucional)")
+                obs = data.get("observacoes_memoria", "Nenhuma observação registrada.")
+                st.write(obs)
 
                 # --- GERAÇÃO DE CSV ---
                 df = pd.DataFrame([{
@@ -195,7 +276,7 @@ if st.button("🚀 Analisar com Phelipe") and uploaded_files and num_decisao and
                     "data_implementacao_gestor": data_implementacao_gestor,
                     "relatorio_tecnico": data.get("relatorio_tecnico", "Não disponível"),
                     "analise_contextual": data.get("analise_contextual", "Não disponível"),
-                    "classificacao_final": data.get("classificacao_final", "Não classificado"),
+                    "classificacao_final": classificacao_final,
                     "insights_prevencao": ", ".join(data.get("insights_capacitacao", {}).get("sugestoes_prevencao", ["Nenhuma"])),
                     "indicio_dano": "Sim" if data.get("indicios_dano_erario", {}).get("consta_dano") else "Não",
                     "detalhe_dano": data.get("indicios_dano_erario", {}).get("descricao", "Não consta"),
@@ -203,8 +284,12 @@ if st.button("🚀 Analisar com Phelipe") and uploaded_files and num_decisao and
                 }])
                 
                 csv = df.to_csv(index=False, encoding='utf-8-sig')
-                st.session_state.csv = csv
-                st.session_state.csv_filename = f"phelipe_{num_decisao.replace('/', '-')}.csv"
+                st.download_button(
+                    "⬇️ Baixar CSV (completo)",
+                    data=csv,
+                    file_name=f"phelipe_{num_decisao.replace('/', '-')}.csv",
+                    mime="text/csv"
+                )
 
             except Exception as e:
                 st.error(f"Erro ao processar saída: {e}")
@@ -213,140 +298,13 @@ if st.button("🚀 Analisar com Phelipe") and uploaded_files and num_decisao and
         except Exception as e:
             st.error(f"Erro ao processar PDF: {e}")
 
-# --- EXIBIÇÃO DOS RESULTADOS ---
-if st.session_state.analise_feita:
-    data = st.session_state.data
-
-    st.subheader("📄 Relatório Técnico")
-    st.write(data.get("relatorio_tecnico", "Não disponível"))
-
-    st.subheader("🏥 Análise Contextual (SES-MT)")
-    st.write(data.get("analise_contextual", "Não disponível"))
-
-    # --- 📝 ANÁLISE DA AÇÃO DO GESTOR (com prompt isolado) ---
-    st.subheader("📝 Análise da Ação do Gestor")
-    
-    try:
-        prompt_analise_acao = f"""
-        Você é Phelipe, um especialista técnico em controle interno, controle externo, SES/MT, integridade e normas aplicáveis.
-        Sua tarefa é **avaliar diretamente se a ação do gestor cumpre a recomendação**, com base apenas nos documentos.
-
-        ### RECOMENDAÇÃO:
-        {recomendacao}
-
-        ### AÇÃO DO GESTOR:
-        {acao_gestor}
-
-        ### STATUS DA AÇÃO:
-        {status_acao}
-
-        ### INSTRUÇÕES:
-        1. Compare diretamente a ação com a recomendação.
-        2. Se o status for "Implementada":
-           - Verifique se há **evidência documental** da execução.
-           - Avalie se a ação **realmente implementou** a recomendação.
-        3. Se o status for "Em Implementação":
-           - Avalie o **potencial de eficácia**: a ação descrita corrige a causa raiz?
-           - Verifique se o **prazo informado é coerente e factível**.
-        4. Classifique com base nisso:
-           - ✅ Compatível: ação completa e comprovada (ou plano viável)
-           - ⚠️ Parcialmente compatível: ação incompleta, sem evidência ou com risco alto
-           - ❌ Incompatível: ação irrelevante, contradiz a recomendação ou não corrige o problema
-           - 🚫 Não Aplicável: justifique
-        5. Retorne apenas um texto claro, técnico e objetivo, com até 150 palavras.
-        6. Nunca invente dados. Se não constar, diga "Não consta no documento".
-        """
-
-        response = model.generate_content(prompt_analise_acao)
-        analise_acao = response.text.strip()
-        st.write(analise_acao)
-
-        # Atualiza a classificação final
-        if "✅ Compatível" in analise_acao:
-            st.session_state.data["classificacao_final"] = "✅ Compatível"
-        elif "⚠️ Parcialmente" in analise_acao:
-            st.session_state.data["classificacao_final"] = "⚠️ Parcialmente compatível"
-        elif "❌ Incompatível" in analise_acao:
-            st.session_state.data["classificacao_final"] = "❌ Incompatível"
-        elif "🚫 Não Aplicável" in analise_acao:
-            st.session_state.data["classificacao_final"] = "🚫 Não Aplicável"
-
-    except Exception as e:
-        st.error(f"Erro ao gerar análise da ação: {e}")
-
-    # --- 📊 CLASSIFICAÇÃO FINAL ---
-    st.subheader("📊 Classificação Final")
-    st.markdown(f"**{data.get('classificacao_final', 'Não classificado')}**")
-
-    # --- 🧠 INSIGHTS PARA CAPACITAÇÃO ---
-    st.subheader("🎓 Insights para Capacitação")
-    insights = data.get("insights_capacitacao", {})
-    st.write("**Padrões identificados:**")
-    for p in insights.get("padroes_identificados", []):
-        st.write(f"• {p}")
-    st.write("**Sugestões de prevenção:**")
-    for s in insights.get("sugestoes_prevencao", []):
-        st.write(f"• {s}")
-    st.write("**Modus Operandi (se houver indício de má-fé):**")
-    for m in insights.get("modus_operandi", []):
-        st.write(f"• {m}")
-
-    # --- 💸 INDÍCIOS DE DANO AO ERÁRIO ---
-    st.subheader("⚠️ Indícios de Dano ao Erário")
-    dano = data.get("indicios_dano_erario", {})
-    if dano.get("consta_dano"):
-        st.markdown(f"**✅ Há indício de dano ao erário**")
-        st.write(dano.get("descricao", "Não especificado"))
-        st.caption(f"Fonte: {dano.get('fundamentacao', 'Não consta')}")
-    else:
-        st.markdown(f"**❌ Não há menção a dano ao erário**")
-        st.caption(dano.get("descricao", "Não consta"))
-
-    # --- 🧠 OBSERVAÇÕES DE MEMÓRIA INSTITUCIONAL ---
-    st.subheader("🧠 Observações Contextuais (Memória Institucional)")
-    obs = data.get("observacoes_memoria", "Nenhuma observação registrada.")
-    st.write(obs)
-
-    # --- BOTÃO DE DOWNLOAD DO CSV ---
-    if st.session_state.csv:
-        st.download_button(
-            "⬇️ Baixar CSV (completo)",
-            data=st.session_state.csv,
-            file_name=st.session_state.csv_filename,
-            mime="text/csv"
-        )
-
-# --- 🔁 ATUALIZAR HISTÓRICO AO ABRIR ---
-def atualizar_historico():
-    caminho_local = "memoria/historico.csv"
-    if os.path.exists(caminho_local):
-        try:
-            df = pd.read_csv(caminho_local)
-            st.sidebar.success("✅ Histórico carregado localmente.")
-        except Exception as e:
-            st.sidebar.warning(f"⚠️ Não leu histórico: {e}")
-    else:
-        st.sidebar.info("📁 Histórico não encontrado.")
-
-atualizar_historico()
-
-# --- 🆕 NOVA ANÁLISE (mantém os PDFs) ---
-st.sidebar.subheader("🔄 Nova Recomendação (mesma decisão)")
-if st.sidebar.button("Limpar campos para nova recomendação"):
-    st.session_state.analise_feita = False
-    st.session_state.data = {}
-    st.session_state.csv = None
-    st.session_state.csv_filename = ""
-    st.rerun()
-
-# --- 💬 PERGUNTE AO PHELipe (com memória leve) ---
+# --- 💬 PERGUNTE AO PHELipe (com memória) ---
 st.subheader("💬 Pergunte ao Phelipe")
 pergunta = st.text_input("Ex: Quem são os auditores? Já houve isso em Rondonópolis?")
 if pergunta:
     with st.spinner("Buscando no histórico..."):
         try:
             contexto = ""
-            # Buscar no histórico local
             try:
                 df = pd.read_csv("memoria/historico.csv")
                 candidatos = df[
