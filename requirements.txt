@@ -1,6 +1,14 @@
+<<<<<<< HEAD
 streamlit==1.36.0
 google-generativeai==0.5.0
 PyPDF2==3.0.1
 pandas==2.2.2
 gspread
+=======
+streamlit==1.36.0
+google-generativeai==0.5.0
+PyPDF2==3.0.1
+pandas==2.2.2
+gspread
+>>>>>>> 5f27e44ad900bd055175110953dac9009f4d3f3b
 google-auth
